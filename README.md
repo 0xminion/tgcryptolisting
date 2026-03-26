@@ -1,4 +1,4 @@
-# tgcryptolisting
+# token-listing-tracker
 
 Track new cryptocurrency exchange listings across 8 major exchanges and deliver alerts via Telegram.
 
@@ -14,6 +14,9 @@ Track new cryptocurrency exchange listings across 8 major exchanges and deliver 
 - **Snapshot Diffing**: Compares current exchange state against stored snapshots to detect new pairs
 - **Hybrid Architecture**: [ccxt](https://github.com/ccxt/ccxt) for commodity exchanges + custom HTTP adapters for exchanges requiring metadata (Binance Alpha, OKX listTime, Coinbase roadmap)
 - **Resilient Storage**: Atomic JSON writes, append-only daily journal, backup rotation, staleness detection
+- **429 Rate-Limit Handling**: Automatic retries with `Retry-After` header parsing (seconds and HTTP-date formats) and exponential backoff
+- **Snapshot Shrink Protection**: Detects partial/empty API responses and skips diffing to prevent false-positive alert floods on exchange outages
+- **Safe Message Splitting**: Tracks and closes/reopens HTML tags (`<pre>`, `<b>`, `<i>`) at chunk boundaries for valid Telegram messages
 
 ## Sample Output
 
@@ -39,8 +42,8 @@ Exchanges with new listings appear first (in priority order). Exchanges with no 
 ## Installation
 
 ```bash
-git clone https://github.com/0xminion/tgcryptolisting.git
-cd tgcryptolisting
+git clone https://github.com/0xminion/token-listing-tracker.git
+cd token-listing-tracker
 pip install -e .
 ```
 
@@ -106,7 +109,7 @@ main.py (asyncio orchestrator)
 | Upbit | ccxt | `load_markets()` | Public |
 | Bithumb | ccxt | `load_markets()` | Public |
 | Bybit | Custom | `/v5/market/instruments-info` (spot + linear) | Public |
-| Bitget | Custom | `/api/v2/spot/public/symbols` + `/api/v2/mix/market/tickers` | Public |
+| Bitget | Custom | `/api/v2/spot/public/symbols` + `/api/v2/mix/market/contracts` | Public |
 | Kraken | ccxt | `load_markets()` | Public |
 
 All endpoints are public and free — no API keys required.
@@ -129,7 +132,8 @@ data/
 
 - **Atomic writes**: Write to `.tmp` then `os.rename()` — no corruption on crash
 - **Backup rotation**: Previous snapshot kept as `.bak`
-- **Staleness detection**: Warning if any exchange shows n/a for 7+ consecutive polls
+- **Staleness detection**: Warning if any exchange returns 0 symbols for 7+ consecutive polls
+- **Lock file safety**: File locks use persistent lock files to avoid inode race conditions between concurrent processes
 
 ## Testing
 
