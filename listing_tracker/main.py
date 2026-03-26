@@ -61,6 +61,10 @@ async def fetch_exchange(adapter: BaseAdapter) -> tuple[str, dict | AdapterError
 async def poll() -> list[NewListing]:
     """Poll all exchanges, diff against stored snapshots, return new listings."""
     storage.ensure_dirs()
+
+    # Clean up old journals on every poll (fast on empty dir, prevents accumulation)
+    storage.cleanup_old_journals()
+
     adapters = []
     for name in EXCHANGES:
         try:
@@ -73,7 +77,6 @@ async def poll() -> list[NewListing]:
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     all_new_listings: list[NewListing] = []
-    errors: dict[str, str] = {}
 
     for result in results:
         if isinstance(result, Exception):
@@ -84,7 +87,6 @@ async def poll() -> list[NewListing]:
 
         if isinstance(snapshot_or_error, AdapterError):
             logger.error("Adapter error: %s", snapshot_or_error)
-            errors[exchange_name] = str(snapshot_or_error)
             # Don't update staleness on adapter errors — staleness tracks
             # "no new listings" not "adapter broken"
             continue

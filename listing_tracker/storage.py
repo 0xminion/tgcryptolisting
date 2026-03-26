@@ -8,10 +8,11 @@ import logging
 import os
 import shutil
 from contextlib import contextmanager
+from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from listing_tracker import config as _config
+from listing_tracker import config
 
 logger = logging.getLogger(__name__)
 
@@ -45,17 +46,25 @@ def _locked_file(path: Path, mode: str = "r"):
 # --- Directory Setup ---
 
 
+def _snapshot_dir() -> Path:
+    return config.SNAPSHOT_DIR
+
+
+def _journal_dir() -> Path:
+    return config.JOURNAL_DIR
+
+
 def ensure_dirs() -> None:
     """Create storage directories if they don't exist."""
-    _config.SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
-    _config.JOURNAL_DIR.mkdir(parents=True, exist_ok=True)
+    _snapshot_dir().mkdir(parents=True, exist_ok=True)
+    _journal_dir().mkdir(parents=True, exist_ok=True)
 
 
 # --- Snapshot Storage ---
 
 
 def snapshot_path(exchange: str, market_type: str = "spot") -> Path:
-    return _config.SNAPSHOT_DIR / f"{exchange}_{market_type}.json"
+    return _snapshot_dir() / f"{exchange}_{market_type}.json"
 
 
 def load_snapshot(path: Path) -> dict | None:
@@ -92,20 +101,22 @@ def save_snapshot(path: Path, data: dict) -> None:
 
 
 def build_snapshot(instruments: dict) -> dict:
-    """Build a snapshot dict from instruments."""
+    """Build a snapshot dict from instruments.
+
+    Uses dataclasses.asdict() for fast field access on InstrumentInfo instances,
+    avoiding repeated hasattr/getattr calls in the hot poll path.
+    """
+    symbols: dict[str, dict] = {}
+    for key, info in instruments.items():
+        d = asdict(info)
+        # listing_type enum serialises to its .value automatically via asdict,
+        # but we need the string for the snapshot format
+        lt = d.pop("listing_type")
+        d["listing_type"] = lt.value if hasattr(lt, "value") else str(lt)
+        symbols[key] = d
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "symbols": {
-            key: {
-                "symbol": info.symbol if hasattr(info, "symbol") else str(info),
-                "base": getattr(info, "base", ""),
-                "quote": getattr(info, "quote", ""),
-                "listing_type": getattr(info, "listing_type", "S").value if hasattr(getattr(info, "listing_type", "S"), "value") else "S",
-                "status": getattr(info, "status", ""),
-                "list_time": getattr(info, "list_time", None),
-            }
-            for key, info in instruments.items()
-        },
+        "symbols": symbols,
     }
 
 
@@ -116,7 +127,7 @@ def journal_path(date: datetime | None = None) -> Path:
     """Path to today's journal file."""
     if date is None:
         date = datetime.now(timezone.utc)
-    return _config.JOURNAL_DIR / f"journal_{date.strftime('%Y-%m-%d')}.json"
+    return _journal_dir() / f"journal_{date.strftime('%Y-%m-%d')}.json"
 
 
 def load_journal(date: datetime | None = None) -> list[dict]:
@@ -162,13 +173,14 @@ def cleanup_old_journals() -> int:
 
     Returns the number of files deleted.
     """
-    if not _config.JOURNAL_DIR.exists():
+    journal_dir = _journal_dir()
+    if not journal_dir.exists():
         return 0
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=_config.JOURNAL_RETENTION_DAYS)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=config.JOURNAL_RETENTION_DAYS)
     deleted = 0
 
-    for path in _config.JOURNAL_DIR.iterdir():
+    for path in journal_dir.iterdir():
         if not path.name.startswith("journal_") or not path.name.endswith(".json"):
             continue
         try:
@@ -188,7 +200,7 @@ def cleanup_old_journals() -> int:
 
 
 def staleness_path() -> Path:
-    return _config.SNAPSHOT_DIR / "_staleness.json"
+    return _snapshot_dir() / "_staleness.json"
 
 
 def load_staleness() -> dict[str, int]:
@@ -204,7 +216,13 @@ def load_staleness() -> dict[str, int]:
 
 
 def update_staleness(exchange: str, has_new_listings: bool) -> int:
-    """Update staleness counter for an exchange. Returns current count."""
+    """Update staleness counter for an exchange. Returns current count.
+
+    Also prunes entries for exchanges that are no longer in EXCHANGES
+    (prevents unbounded growth of the staleness file).
+    """
+    from listing_tracker.config import EXCHANGES as _EXCHANGES  # late import to avoid circular
+
     path = staleness_path()
 
     with _locked_file(path, "w"):
@@ -215,6 +233,10 @@ def update_staleness(exchange: str, has_new_listings: bool) -> int:
                 counters = {}
         else:
             counters = {}
+
+        # Prune stale entries for exchanges no longer tracked
+        active_exchanges = set(_EXCHANGES.keys())
+        counters = {k: v for k, v in counters.items() if k in active_exchanges}
 
         if has_new_listings:
             counters[exchange] = 0

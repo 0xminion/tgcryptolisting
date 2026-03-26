@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import httpx
@@ -13,6 +14,7 @@ from listing_tracker.exchanges.base import (
     InstrumentInfo,
     ListingType,
 )
+from listing_tracker.http_client import make_client, with_429_retry
 
 logger = logging.getLogger(__name__)
 
@@ -23,11 +25,7 @@ TRADING_STATUS = {"TRADING", "PRE_TRADING"}
 class BinanceAdapter(BaseAdapter):
     def __init__(self, config: ExchangeConfig):
         super().__init__(config)
-        self._client = httpx.AsyncClient(
-            timeout=ADAPTER_TIMEOUT_SECONDS,
-            limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
-            transport=httpx.AsyncHTTPTransport(retries=3),
-        )
+        self._client = make_client()
 
     async def fetch_instruments(self) -> dict[str, InstrumentInfo]:
         instruments: dict[str, InstrumentInfo] = {}
@@ -45,11 +43,17 @@ class BinanceAdapter(BaseAdapter):
 
     async def _fetch_spot(self) -> dict[str, InstrumentInfo]:
         try:
-            resp = await self._client.get(self.config.spot_url)
+            resp = await with_429_retry(
+                self._client.get(self.config.spot_url)
+            )
             resp.raise_for_status()
             data = resp.json()
-        except (httpx.HTTPError, ValueError) as e:
+        except (httpx.HTTPError, asyncio.TimeoutError, ValueError) as e:
             raise AdapterError(f"binance spot: {e}") from e
+
+        # Surface application-layer errors that return 2xx with an error body
+        if isinstance(data, dict) and "code" in data and data.get("code") != 0:
+            raise AdapterError(f"binance spot: API error: {data.get('msg')}")
 
         instruments: dict[str, InstrumentInfo] = {}
         for sym in data.get("symbols", []):
@@ -87,11 +91,16 @@ class BinanceAdapter(BaseAdapter):
 
     async def _fetch_futures(self) -> dict[str, InstrumentInfo]:
         try:
-            resp = await self._client.get(self.config.futures_url)
+            resp = await with_429_retry(
+                self._client.get(self.config.futures_url)
+            )
             resp.raise_for_status()
             data = resp.json()
-        except (httpx.HTTPError, ValueError) as e:
+        except (httpx.HTTPError, asyncio.TimeoutError, ValueError) as e:
             raise AdapterError(f"binance futures: {e}") from e
+
+        if isinstance(data, dict) and "code" in data and data.get("code") != 0:
+            raise AdapterError(f"binance futures: API error: {data.get('msg')}")
 
         instruments: dict[str, InstrumentInfo] = {}
         for sym in data.get("symbols", []):

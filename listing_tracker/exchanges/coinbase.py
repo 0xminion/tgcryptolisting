@@ -16,6 +16,7 @@ from listing_tracker.exchanges.base import (
     InstrumentInfo,
     ListingType,
 )
+from listing_tracker.http_client import make_client, with_429_retry
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +42,7 @@ class CoinbaseAdapter(BaseAdapter):
 
     def __init__(self, config: ExchangeConfig):
         super().__init__(config)
-        self._client = httpx.AsyncClient(
-            timeout=ADAPTER_TIMEOUT_SECONDS,
-            limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
-            transport=httpx.AsyncHTTPTransport(retries=3),
-        )
+        self._client = make_client()
 
     async def fetch_instruments(self) -> dict[str, InstrumentInfo]:
         instruments = await self._fetch_spot_products()
@@ -60,10 +57,10 @@ class CoinbaseAdapter(BaseAdapter):
 
     async def _fetch_spot_products(self) -> dict[str, InstrumentInfo]:
         try:
-            resp = await self._client.get(PRODUCTS_URL)
+            resp = await with_429_retry(self._client.get(PRODUCTS_URL))
             resp.raise_for_status()
             products = resp.json()
-        except (httpx.HTTPError, ValueError) as e:
+        except (httpx.HTTPError, asyncio.TimeoutError, ValueError) as e:
             raise AdapterError(f"coinbase: {e}") from e
 
         instruments: dict[str, InstrumentInfo] = {}
@@ -159,7 +156,7 @@ class CoinbaseAdapter(BaseAdapter):
 
 
 # Large skip list of common English words, crypto terms, and acronyms
-# that match the 2-6 uppercase letter pattern but are not token tickers
+# that match the 3-6 uppercase letter pattern but are not token tickers
 _SKIP_WORDS = frozenset({
     # Common English 3-6 letter words
     "THE", "AND", "FOR", "NEW", "ADD", "HAS", "ARE", "WAS", "BUT", "NOT",

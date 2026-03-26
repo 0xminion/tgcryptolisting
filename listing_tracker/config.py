@@ -26,15 +26,15 @@ JOURNAL_RETENTION_DAYS = 30
 # Telegram
 TELEGRAM_MAX_MESSAGE_LENGTH = 4096
 
-# Exchange priority order (for display sorting)
+# Exchange priority order (for display sorting in reports)
 EXCHANGE_PRIORITY = [
     "binance",
     "okx",
     "coinbase",
-    "upbit",
-    "bithumb",
     "bybit",
     "bitget",
+    "upbit",
+    "bithumb",
     "kraken",
 ]
 

@@ -22,6 +22,11 @@ def send_telegram_message(message: str) -> bool:
     if not message:
         return True
 
+    import shutil as _shutil
+    if not _shutil.which("hermes"):
+        logger.error("hermes binary not found in PATH — cannot send alerts")
+        return False
+
     try:
         # Write message to temp file to isolate content from the prompt
         with tempfile.NamedTemporaryFile(

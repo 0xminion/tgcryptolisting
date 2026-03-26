@@ -21,7 +21,7 @@ class ListingType(str, Enum):
     SPOT = "S"
     FUTURES = "F"
     ROADMAP = "R"
-    ALPHA = "A/O"
+    ALPHA = "A"
 
 
 @dataclass(slots=True)

@@ -53,8 +53,10 @@ def compare_snapshots(
         info = current["symbols"][key]
         listing_type_raw = info.get("listing_type", "S")
         if isinstance(listing_type_raw, str):
+            # Normalise compound values: "A/O" -> "A" (Alpha/Other -> Alpha)
+            normalized = listing_type_raw.split("/")[0]
             try:
-                listing_type = ListingType(listing_type_raw)
+                listing_type = ListingType(normalized)
             except ValueError:
                 listing_type = ListingType.SPOT
         else:
