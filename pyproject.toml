@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-listing-tracker"
+version = "0.1.0"
+description = "Track new cryptocurrency exchange listings across 8 major exchanges"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27.0",
+    "ccxt>=4.0.0",
+    "python-dateutil>=2.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-httpx>=0.30",
+]
+
+[tool.setuptools.packages.find]
+include = ["listing_tracker*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
