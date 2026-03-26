@@ -16,8 +16,8 @@ from listing_tracker.exchanges.base import (
 
 logger = logging.getLogger(__name__)
 
-# Only include symbols in TRADING status
-TRADING_STATUS = {"TRADING"}
+# Include TRADING (normal listings) and PRE_TRADING (alpha/pre-listing stage)
+TRADING_STATUS = {"TRADING", "PRE_TRADING"}
 
 
 class BinanceAdapter(BaseAdapter):
