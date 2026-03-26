@@ -23,7 +23,11 @@ FUTURES_URL = "https://api.bitget.com/api/v2/mix/market/tickers"
 class BitgetAdapter(BaseAdapter):
     def __init__(self, config: ExchangeConfig):
         super().__init__(config)
-        self._client = httpx.AsyncClient(timeout=ADAPTER_TIMEOUT_SECONDS)
+        self._client = httpx.AsyncClient(
+            timeout=ADAPTER_TIMEOUT_SECONDS,
+            limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
+            retries=3,
+        )
 
     async def fetch_instruments(self) -> dict[str, InstrumentInfo]:
         instruments: dict[str, InstrumentInfo] = {}
@@ -51,10 +55,10 @@ class BitgetAdapter(BaseAdapter):
                     continue
                 instruments[f"bitget:futures:{symbol}"] = InstrumentInfo(
                     symbol=symbol,
-                    base=item.get("baseCoin", symbol),
+                    base=item.get("baseCoin", ""),
                     quote=item.get("quoteCoin", "USDT"),
                     listing_type=ListingType.FUTURES,
-                    status="active",
+                    status=item.get("status", "active"),
                 )
 
         return instruments

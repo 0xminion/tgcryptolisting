@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import logging
 import sys
 from datetime import datetime, timedelta, timezone
@@ -16,15 +15,11 @@ from listing_tracker.config import (
 )
 from listing_tracker.exchanges.base import (
     AdapterError,
+    AdapterRegistry,
     BaseAdapter,
     CcxtAdapter,
     ListingType,
 )
-from listing_tracker.exchanges.binance import BinanceAdapter
-from listing_tracker.exchanges.okx import OkxAdapter
-from listing_tracker.exchanges.coinbase import CoinbaseAdapter
-from listing_tracker.exchanges.bybit import BybitAdapter
-from listing_tracker.exchanges.bitget import BitgetAdapter
 from listing_tracker import storage
 from listing_tracker.differ import NewListing, compare_snapshots, deduplicate_listings
 from listing_tracker.formatter import format_daily_report, format_realtime_alert
@@ -39,22 +34,12 @@ logger = logging.getLogger(__name__)
 
 
 def create_adapter(exchange_name: str) -> BaseAdapter:
-    """Create the appropriate adapter for an exchange."""
+    """Create the appropriate adapter for an exchange using the registry."""
     config = EXCHANGES[exchange_name]
     if config.adapter_type == "ccxt":
         return CcxtAdapter(config)
-    elif exchange_name == "binance":
-        return BinanceAdapter(config)
-    elif exchange_name == "okx":
-        return OkxAdapter(config)
-    elif exchange_name == "coinbase":
-        return CoinbaseAdapter(config)
-    elif exchange_name == "bybit":
-        return BybitAdapter(config)
-    elif exchange_name == "bitget":
-        return BitgetAdapter(config)
-    else:
-        raise ValueError(f"Unknown exchange: {exchange_name}")
+    # Custom adapters registered in AdapterRegistry
+    return AdapterRegistry.get(exchange_name, config)
 
 
 async def fetch_exchange(adapter: BaseAdapter) -> tuple[str, dict | AdapterError]:
@@ -125,6 +110,7 @@ async def poll() -> list[NewListing]:
 
         if stale_count >= STALENESS_THRESHOLD_POLLS:
             logger.warning("%s: stale for %d consecutive polls", exchange_name, stale_count)
+            errors[exchange_name] = f"stale ({stale_count} consecutive polls with no new listings)"
 
         all_new_listings.extend(new_listings)
 
@@ -160,6 +146,11 @@ async def poll() -> list[NewListing]:
 
 async def report() -> list[str]:
     """Generate the daily digest report from the last 24 hours of journal entries."""
+    # Clean up old journals before generating report
+    deleted = storage.cleanup_old_journals()
+    if deleted:
+        logger.info("Cleaned up %d stale journal file(s)", deleted)
+
     now = datetime.now(timezone.utc)
     today_entries = storage.load_journal(now)
     yesterday_entries = storage.load_journal(now - timedelta(days=1))
@@ -175,9 +166,13 @@ async def report() -> list[str]:
         ex = entry.get("exchange", "unknown")
         listings_by_exchange.setdefault(ex, []).append(entry)
 
-    # Get staleness and errors
+    # Get staleness
     staleness = storage.load_staleness()
-    errors: dict[str, str] = {}  # TODO: persist adapter errors from last poll
+    # Build errors dict from staleness for formatter
+    errors: dict[str, str] = {}
+    for ex, count in staleness.items():
+        if count >= STALENESS_THRESHOLD_POLLS:
+            errors[ex] = f"stale ({count} consecutive polls)"
 
     messages = format_daily_report(listings_by_exchange, errors, staleness, now)
     return messages

@@ -2,9 +2,14 @@
 
 from pathlib import Path
 from dataclasses import dataclass
+import os
 
-# Storage paths
-DATA_DIR = Path.home() / ".hermes" / "skills" / "listing-tracker" / "data"
+# Storage paths — allow override via env var
+_DATA_DIR = os.environ.get(
+    "LISTING_TRACKER_DATA_DIR",
+    str(Path.home() / ".hermes" / "skills" / "listing-tracker" / "data"),
+)
+DATA_DIR = Path(_DATA_DIR)
 SNAPSHOT_DIR = DATA_DIR / "snapshots"
 JOURNAL_DIR = DATA_DIR / "journal"
 
@@ -14,6 +19,9 @@ MAX_RETRIES = 3
 
 # Polling
 STALENESS_THRESHOLD_POLLS = 7  # 7 consecutive n/a = warning
+
+# Journal retention
+JOURNAL_RETENTION_DAYS = 30
 
 # Telegram
 TELEGRAM_MAX_MESSAGE_LENGTH = 4096

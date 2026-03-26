@@ -1,4 +1,4 @@
-"""Base adapter classes for exchange listing tracking."""
+"""Base adapter classes and adapter registry for exchange listing tracking."""
 
 from __future__ import annotations
 
@@ -6,8 +6,10 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
+from typing import Callable, ClassVar
 
 import ccxt
+import httpx
 
 from listing_tracker.config import ExchangeConfig
 
@@ -100,3 +102,50 @@ class CcxtAdapter(BaseAdapter):
 
     async def close(self) -> None:
         self._exchange.close()
+
+
+# --- Adapter Registry ---
+
+
+class AdapterRegistry:
+    """Registry mapping exchange names to their adapter classes.
+
+    Allows adding custom adapters without modifying main.py.
+    """
+
+    _adapters: ClassVar[dict[str, type[BaseAdapter]]] = {}
+
+    @classmethod
+    def register(cls, name: str, adapter_cls: type[BaseAdapter]) -> None:
+        """Decorator or explicit registration of an adapter class."""
+        cls._adapters[name] = adapter_cls
+
+    @classmethod
+    def get(cls, name: str, config: ExchangeConfig) -> BaseAdapter:
+        """Instantiate an adapter by exchange name."""
+        if name not in cls._adapters:
+            raise ValueError(f"No adapter registered for exchange: {name}")
+        return cls._adapters[name](config)
+
+    @classmethod
+    def registered(cls) -> frozenset[str]:
+        """Return set of registered exchange names."""
+        return frozenset(cls._adapters.keys())
+
+
+def _register_builtin_adapters() -> None:
+    """Register built-in adapters. Called once at module load."""
+    from listing_tracker.exchanges.binance import BinanceAdapter
+    from listing_tracker.exchanges.bitget import BitgetAdapter
+    from listing_tracker.exchanges.bybit import BybitAdapter
+    from listing_tracker.exchanges.coinbase import CoinbaseAdapter
+    from listing_tracker.exchanges.okx import OkxAdapter
+
+    AdapterRegistry.register("binance", BinanceAdapter)
+    AdapterRegistry.register("okx", OkxAdapter)
+    AdapterRegistry.register("coinbase", CoinbaseAdapter)
+    AdapterRegistry.register("bybit", BybitAdapter)
+    AdapterRegistry.register("bitget", BitgetAdapter)
+
+
+_register_builtin_adapters()

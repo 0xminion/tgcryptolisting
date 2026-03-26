@@ -16,11 +16,18 @@ from listing_tracker.exchanges.base import (
 
 logger = logging.getLogger(__name__)
 
+# Only include symbols in TRADING status
+TRADING_STATUS = {"TRADING"}
+
 
 class BinanceAdapter(BaseAdapter):
     def __init__(self, config: ExchangeConfig):
         super().__init__(config)
-        self._client = httpx.AsyncClient(timeout=ADAPTER_TIMEOUT_SECONDS)
+        self._client = httpx.AsyncClient(
+            timeout=ADAPTER_TIMEOUT_SECONDS,
+            limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
+            retries=3,
+        )
 
     async def fetch_instruments(self) -> dict[str, InstrumentInfo]:
         instruments: dict[str, InstrumentInfo] = {}
@@ -51,6 +58,10 @@ class BinanceAdapter(BaseAdapter):
             if not symbol:
                 continue
 
+            # Only include TRADING symbols
+            if status not in TRADING_STATUS:
+                continue
+
             # Detect alpha/pre-listing status
             permissions = sym.get("permissions", []) or sym.get("permissionSets", [])
             flat_perms = []
@@ -60,7 +71,7 @@ class BinanceAdapter(BaseAdapter):
                 else:
                     flat_perms.append(p)
 
-            if status == "PRE_TRADING" or "TRD_GRP_BINANCE_ALPHA" in flat_perms:
+            if "TRD_GRP_BINANCE_ALPHA" in flat_perms:
                 listing_type = ListingType.ALPHA
             else:
                 listing_type = ListingType.SPOT
@@ -88,6 +99,11 @@ class BinanceAdapter(BaseAdapter):
             status = sym.get("status", "")
             if not symbol:
                 continue
+
+            # Only include TRADING symbols
+            if status not in TRADING_STATUS:
+                continue
+
             instruments[f"binance:futures:{symbol}"] = InstrumentInfo(
                 symbol=symbol,
                 base=sym.get("baseAsset", ""),
