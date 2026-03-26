@@ -6,7 +6,7 @@ import html
 import logging
 from datetime import datetime, timezone
 
-from listing_tracker.config import EXCHANGE_PRIORITY, EXCHANGES, TELEGRAM_MAX_MESSAGE_LENGTH
+from listing_tracker.config import EXCHANGE_PRIORITY, EXCHANGES, STALENESS_THRESHOLD_POLLS, TELEGRAM_MAX_MESSAGE_LENGTH
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ def format_daily_report(
         if not exchange_listings:
             suffix = ""
             stale_count = staleness.get(exchange_name, 0)
-            if stale_count >= 7:
+            if stale_count >= STALENESS_THRESHOLD_POLLS:
                 suffix = " (stale)"
             row = _format_row(display, f"n/a{suffix}")
             no_listings.append(row)

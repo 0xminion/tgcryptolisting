@@ -10,7 +10,7 @@ from listing_tracker.exchanges.base import ListingType
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass(slots=True)
 class NewListing:
     exchange: str
     symbol: str

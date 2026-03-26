@@ -18,6 +18,9 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.bybit.com/v5/market/instruments-info"
 
+# Bybit status values that indicate a tradeable instrument
+TRADING_STATUSES = {"Trading", "Open", "Normal"}
+
 
 class BybitAdapter(BaseAdapter):
     def __init__(self, config: ExchangeConfig):
@@ -40,12 +43,15 @@ class BybitAdapter(BaseAdapter):
                 symbol = item.get("symbol", "")
                 if not symbol:
                     continue
+                status = item.get("status", "")
+                if status not in TRADING_STATUSES:
+                    continue
                 instruments[f"bybit:{category}:{symbol}"] = InstrumentInfo(
                     symbol=symbol,
                     base=item.get("baseCoin", ""),
                     quote=item.get("quoteCoin", item.get("settleCoin", "")),
                     listing_type=listing_type,
-                    status=item.get("status", ""),
+                    status=status,
                 )
         return instruments
 

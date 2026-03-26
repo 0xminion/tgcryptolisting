@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, ClassVar
+from typing import ClassVar
 
 import ccxt
 import httpx
@@ -23,7 +24,7 @@ class ListingType(str, Enum):
     ALPHA = "A/O"
 
 
-@dataclass
+@dataclass(slots=True)
 class InstrumentInfo:
     symbol: str
     base: str
@@ -78,7 +79,7 @@ class CcxtAdapter(BaseAdapter):
 
     async def fetch_instruments(self) -> dict[str, InstrumentInfo]:
         try:
-            markets = self._exchange.load_markets(reload=True)
+            markets = await asyncio.to_thread(self._exchange.load_markets, reload=True)
         except ccxt.BaseError as e:
             raise AdapterError(f"{self.exchange_name}: ccxt error: {e}") from e
 
@@ -88,7 +89,7 @@ class CcxtAdapter(BaseAdapter):
                 continue
             listing_type = (
                 ListingType.FUTURES
-                if market.get("type") in ("swap", "future")
+                if market.get("type") in ("swap", "future", "option", "margin", "index")
                 else ListingType.SPOT
             )
             instruments[symbol] = InstrumentInfo(
@@ -101,7 +102,7 @@ class CcxtAdapter(BaseAdapter):
         return instruments
 
     async def close(self) -> None:
-        self._exchange.close()
+        await asyncio.to_thread(self._exchange.close)
 
 
 # --- Adapter Registry ---

@@ -31,11 +31,8 @@ EXCHANGE_PRIORITY = [
     "binance",
     "okx",
     "coinbase",
-    "upbit",
-    "bithumb",
     "bybit",
     "bitget",
-    "kraken",
 ]
 
 

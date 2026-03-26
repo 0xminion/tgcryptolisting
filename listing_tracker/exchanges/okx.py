@@ -18,6 +18,9 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://www.okx.com/api/v5/public/instruments"
 
+# OKX instrument states that indicate a live, tradeable instrument
+LIVE_STATES = {"live"}
+
 
 class OkxAdapter(BaseAdapter):
     def __init__(self, config: ExchangeConfig):
@@ -41,6 +44,8 @@ class OkxAdapter(BaseAdapter):
                 if not inst_id:
                     continue
                 state = inst.get("state", "")
+                if state not in LIVE_STATES:
+                    continue
                 list_time = inst.get("listTime", "")
 
                 instruments[f"okx:{inst_type.lower()}:{inst_id}"] = InstrumentInfo(

@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 SPOT_URL = "https://api.bitget.com/api/v2/spot/public/symbols"
 FUTURES_URL = "https://api.bitget.com/api/v2/mix/market/tickers"
 
+# Bitget status values that indicate a tradeable instrument
+TRADING_STATUSES = {"online", "open"}
+
 
 class BitgetAdapter(BaseAdapter):
     def __init__(self, config: ExchangeConfig):
@@ -38,12 +41,15 @@ class BitgetAdapter(BaseAdapter):
             symbol = item.get("symbol", "")
             if not symbol:
                 continue
+            status = item.get("status", "")
+            if status not in TRADING_STATUSES:
+                continue
             instruments[f"bitget:spot:{symbol}"] = InstrumentInfo(
                 symbol=symbol,
                 base=item.get("baseCoin", ""),
                 quote=item.get("quoteCoin", ""),
                 listing_type=ListingType.SPOT,
-                status=item.get("status", ""),
+                status=status,
             )
 
         # Futures
@@ -53,10 +59,13 @@ class BitgetAdapter(BaseAdapter):
                 symbol = item.get("symbol", "")
                 if not symbol:
                     continue
+                quote = item.get("quoteCoin", "")
+                if not quote:
+                    continue
                 instruments[f"bitget:futures:{symbol}"] = InstrumentInfo(
                     symbol=symbol,
                     base=item.get("baseCoin", ""),
-                    quote=item.get("quoteCoin", "USDT"),
+                    quote=quote,
                     listing_type=ListingType.FUTURES,
                     status=item.get("status", "active"),
                 )

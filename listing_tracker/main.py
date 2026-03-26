@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import sys
 from datetime import datetime, timedelta, timezone
 
 from listing_tracker.config import (
@@ -74,7 +73,6 @@ async def poll() -> list[NewListing]:
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     all_new_listings: list[NewListing] = []
-    errors: dict[str, str] = {}
 
     for result in results:
         if isinstance(result, Exception):
@@ -110,7 +108,6 @@ async def poll() -> list[NewListing]:
 
         if stale_count >= STALENESS_THRESHOLD_POLLS:
             logger.warning("%s: stale for %d consecutive polls", exchange_name, stale_count)
-            errors[exchange_name] = f"stale ({stale_count} consecutive polls with no new listings)"
 
         all_new_listings.extend(new_listings)
 
