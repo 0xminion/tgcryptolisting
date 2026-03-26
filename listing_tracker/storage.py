@@ -39,6 +39,7 @@ def _locked_file(path: Path, mode: str = "r"):
     finally:
         fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
         lock_fd.close()
+        lock_path.unlink(missing_ok=True)
 
 
 # --- Directory Setup ---
@@ -72,22 +73,21 @@ def load_snapshot(path: Path) -> dict | None:
 def save_snapshot(path: Path, data: dict) -> None:
     """Atomically save a snapshot with backup rotation.
 
+    All operations happen inside the lock to prevent races:
     1. Write to temp file
     2. Copy current to .bak
     3. os.rename() temp -> target (atomic on POSIX)
-    4. Release lock after rename
     """
     ensure_dirs()
     tmp = path.with_suffix(".tmp")
     backup = path.with_suffix(".bak")
 
-    tmp.write_text(json.dumps(data, indent=2, default=str))
-
-    if path.exists():
-        shutil.copy2(path, backup)
-
-    # Atomic rename within the lock
     with _locked_file(path, "w"):
+        tmp.write_text(json.dumps(data, indent=2, default=str))
+
+        if path.exists():
+            shutil.copy2(path, backup)
+
         os.rename(str(tmp), str(path))
 
 
@@ -100,7 +100,7 @@ def build_snapshot(instruments: dict) -> dict:
                 "symbol": info.symbol if hasattr(info, "symbol") else str(info),
                 "base": getattr(info, "base", ""),
                 "quote": getattr(info, "quote", ""),
-                "listing_type": getattr(info, "listing_type", "S"),
+                "listing_type": getattr(info, "listing_type", "S").value if hasattr(getattr(info, "listing_type", "S"), "value") else "S",
                 "status": getattr(info, "status", ""),
                 "list_time": getattr(info, "list_time", None),
             }

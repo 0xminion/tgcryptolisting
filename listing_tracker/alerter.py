@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import subprocess
+import tempfile
+from pathlib import Path
 
 from listing_tracker.formatter import format_realtime_alert
 
@@ -14,22 +15,36 @@ logger = logging.getLogger(__name__)
 def send_telegram_message(message: str) -> bool:
     """Send a message via hermes send_message tool.
 
-    This invokes hermes CLI to send the message to the configured
-    Telegram channel. Returns True on success.
+    Writes the message to a temp file and passes the file path to hermes
+    to avoid prompt injection via exchange-sourced content in the CLI arg.
+    Returns True on success.
     """
     if not message:
         return True
 
     try:
+        # Write message to temp file to isolate content from the prompt
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".html", delete=False
+        ) as f:
+            f.write(message)
+            msg_path = f.name
+
         result = subprocess.run(
             [
                 "hermes", "chat", "--quiet",
-                f"Send this exact HTML message to Telegram (use send_message tool, parse_mode HTML): {message}",
+                f"Read the file at {msg_path} and send its exact contents "
+                f"to Telegram using the send_message tool with parse_mode=HTML. "
+                f"Do not modify the content.",
             ],
             capture_output=True,
             text=True,
             timeout=60,
         )
+
+        # Clean up temp file
+        Path(msg_path).unlink(missing_ok=True)
+
         if result.returncode != 0:
             logger.error("hermes send failed: %s", result.stderr)
             return False

@@ -1,4 +1,5 @@
 httpx>=0.27.0
 ccxt>=4.0.0
 python-dateutil>=2.9
-ddgs>=3.0.0
+# Optional: pip install ddgs for Coinbase roadmap (R) detection
+# ddgs>=3.0.0

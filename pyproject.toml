@@ -11,10 +11,12 @@ dependencies = [
     "httpx>=0.27.0",
     "ccxt>=4.0.0",
     "python-dateutil>=2.9",
-    "ddgs>=3.0.0",
 ]
 
 [project.optional-dependencies]
+roadmap = [
+    "ddgs>=3.0.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",

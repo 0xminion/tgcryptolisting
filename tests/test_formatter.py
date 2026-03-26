@@ -30,10 +30,13 @@ def test_exchange_ordering():
     }
     messages = format_daily_report(listings, {}, {})
     msg = messages[0]
-    # Kraken has listings so should appear before the n/a separator
+    # Kraken has listings, so it must appear in the report
+    assert "Kraken" in msg
+    assert "XBTUSDT (S)" in msg
+    # Kraken (has listings) should appear before Binance (n/a)
     kraken_pos = msg.find("Kraken")
-    # Any n/a exchange that's higher priority but empty should be after separator
     binance_pos = msg.find("Binance")
+    assert kraken_pos > 0  # Kraken is actually rendered
     assert binance_pos > kraken_pos  # Binance (n/a) after Kraken (has listings)
 
 

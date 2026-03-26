@@ -73,6 +73,7 @@ async def poll() -> list[NewListing]:
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     all_new_listings: list[NewListing] = []
+    errors: dict[str, str] = {}
 
     for result in results:
         if isinstance(result, Exception):
@@ -84,7 +85,8 @@ async def poll() -> list[NewListing]:
         if isinstance(snapshot_or_error, AdapterError):
             logger.error("Adapter error: %s", snapshot_or_error)
             errors[exchange_name] = str(snapshot_or_error)
-            storage.update_staleness(exchange_name, has_new_listings=False)
+            # Don't update staleness on adapter errors — staleness tracks
+            # "no new listings" not "adapter broken"
             continue
 
         current_snapshot = snapshot_or_error

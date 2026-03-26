@@ -28,7 +28,7 @@ class BybitAdapter(BaseAdapter):
         self._client = httpx.AsyncClient(
             timeout=ADAPTER_TIMEOUT_SECONDS,
             limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
-            retries=3,
+            transport=httpx.AsyncHTTPTransport(retries=3),
         )
 
     async def fetch_instruments(self) -> dict[str, InstrumentInfo]:
