@@ -7,7 +7,7 @@ import logging
 
 import httpx
 
-from listing_tracker.config import ADAPTER_TIMEOUT_SECONDS, ExchangeConfig
+from listing_tracker.config import ExchangeConfig
 from listing_tracker.exchanges.base import (
     AdapterError,
     BaseAdapter,
@@ -19,7 +19,7 @@ from listing_tracker.http_client import make_client, with_429_retry
 logger = logging.getLogger(__name__)
 
 SPOT_URL = "https://api.bitget.com/api/v2/spot/public/symbols"
-FUTURES_URL = "https://api.bitget.com/api/v2/mix/market/tickers"
+FUTURES_URL = "https://api.bitget.com/api/v2/mix/market/contracts"
 
 # Bitget status values that indicate a tradeable instrument
 TRADING_STATUSES = {"online", "open"}
@@ -50,29 +50,29 @@ class BitgetAdapter(BaseAdapter):
                 status=status,
             )
 
-        # Futures
+        # Futures (contracts endpoint)
         if self.config.supports_futures:
             futures_items = await self._fetch_futures()
             for item in futures_items:
                 symbol = item.get("symbol", "")
                 if not symbol:
                     continue
-                quote = item.get("quoteCoin", "")
-                if not quote:
+                status = item.get("symbolStatus", item.get("status", ""))
+                if status and status not in TRADING_STATUSES:
                     continue
                 instruments[f"bitget:futures:{symbol}"] = InstrumentInfo(
                     symbol=symbol,
                     base=item.get("baseCoin", ""),
-                    quote=quote,
+                    quote=item.get("quoteCoin", ""),
                     listing_type=ListingType.FUTURES,
-                    status=item.get("status", "active"),
+                    status=status or "active",
                 )
 
         return instruments
 
     async def _fetch_spot(self) -> list[dict]:
         try:
-            resp = await with_429_retry(self._client.get(SPOT_URL))
+            resp = await with_429_retry(lambda: self._client.get(SPOT_URL))
             resp.raise_for_status()
             data = resp.json()
         except (httpx.HTTPError, asyncio.TimeoutError, ValueError) as e:
@@ -85,7 +85,7 @@ class BitgetAdapter(BaseAdapter):
     async def _fetch_futures(self) -> list[dict]:
         try:
             resp = await with_429_retry(
-                self._client.get(FUTURES_URL, params={"productType": "USDT-FUTURES"})
+                lambda: self._client.get(FUTURES_URL, params={"productType": "USDT-FUTURES"})
             )
             resp.raise_for_status()
             data = resp.json()

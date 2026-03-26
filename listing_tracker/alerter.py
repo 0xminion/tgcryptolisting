@@ -27,6 +27,7 @@ def send_telegram_message(message: str) -> bool:
         logger.error("hermes binary not found in PATH — cannot send alerts")
         return False
 
+    msg_path = None
     try:
         # Write message to temp file to isolate content from the prompt
         with tempfile.NamedTemporaryFile(
@@ -47,9 +48,6 @@ def send_telegram_message(message: str) -> bool:
             timeout=60,
         )
 
-        # Clean up temp file
-        Path(msg_path).unlink(missing_ok=True)
-
         if result.returncode != 0:
             logger.error("hermes send failed: %s", result.stderr)
             return False
@@ -57,6 +55,9 @@ def send_telegram_message(message: str) -> bool:
     except (subprocess.TimeoutExpired, FileNotFoundError) as e:
         logger.error("hermes send error: %s", e)
         return False
+    finally:
+        if msg_path:
+            Path(msg_path).unlink(missing_ok=True)
 
 
 def push_realtime_alerts(new_listings: list[dict], max_retries: int = 3) -> bool:

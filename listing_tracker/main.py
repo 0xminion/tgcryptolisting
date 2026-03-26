@@ -93,25 +93,22 @@ async def poll() -> list[NewListing]:
 
         current_snapshot = snapshot_or_error
 
-        # Determine market types for this exchange
-        config = EXCHANGES[exchange_name]
-        market_types = ["spot"]
-        if config.supports_futures:
-            market_types.append("futures")
-
-        # For exchanges with single fetch (returns all market types combined),
-        # we use a single snapshot
         snap_path = storage.snapshot_path(exchange_name, "all")
         previous = storage.load_snapshot(snap_path)
 
         new_listings = compare_snapshots(exchange_name, previous, current_snapshot)
         storage.save_snapshot(snap_path, current_snapshot)
 
-        has_new = len(new_listings) > 0
-        stale_count = storage.update_staleness(exchange_name, has_new_listings=has_new)
+        # Track staleness based on whether the adapter returned any symbols
+        # at all (empty = possible API issue), not whether new listings were
+        # found (which is the normal state for most polls).
+        current_symbol_count = len(current_snapshot.get("symbols", {}))
+        stale_count = storage.update_staleness(
+            exchange_name, has_new_listings=current_symbol_count > 0,
+        )
 
         if stale_count >= STALENESS_THRESHOLD_POLLS:
-            logger.warning("%s: stale for %d consecutive polls", exchange_name, stale_count)
+            logger.warning("%s: returned 0 symbols for %d consecutive polls", exchange_name, stale_count)
 
         all_new_listings.extend(new_listings)
 
@@ -147,19 +144,30 @@ async def poll() -> list[NewListing]:
 
 async def report() -> list[str]:
     """Generate the daily digest report from the last 24 hours of journal entries."""
-    # Clean up old journals before generating report
-    deleted = storage.cleanup_old_journals()
-    if deleted:
-        logger.info("Cleaned up %d stale journal file(s)", deleted)
-
     now = datetime.now(timezone.utc)
     today_entries = storage.load_journal(now)
     yesterday_entries = storage.load_journal(now - timedelta(days=1))
 
-    # Filter to last 24 hours
-    cutoff = (now - timedelta(hours=24)).isoformat()
+    # Clean up old journals AFTER reading to avoid deleting data we need
+    deleted = storage.cleanup_old_journals()
+    if deleted:
+        logger.info("Cleaned up %d stale journal file(s)", deleted)
+
+    # Filter to last 24 hours using proper datetime comparison
+    cutoff = now - timedelta(hours=24)
     all_entries = yesterday_entries + today_entries
-    recent = [e for e in all_entries if e.get("detected_at", "") >= cutoff]
+    recent = []
+    for e in all_entries:
+        detected_str = e.get("detected_at", "")
+        if not detected_str:
+            continue
+        try:
+            detected = datetime.fromisoformat(detected_str)
+            if detected >= cutoff:
+                recent.append(e)
+        except (ValueError, TypeError):
+            # If we can't parse the timestamp, include it to avoid data loss
+            recent.append(e)
 
     # Group by exchange
     listings_by_exchange: dict[str, list[dict]] = {}

@@ -100,7 +100,7 @@ EXCHANGES: dict[str, ExchangeConfig] = {
         display_name="Bitget",
         adapter_type="custom",
         spot_url="https://api.bitget.com/api/v2/spot/public/symbols",
-        futures_url="https://api.bitget.com/api/v2/mix/market/tickers",
+        futures_url="https://api.bitget.com/api/v2/mix/market/contracts",
         supports_futures=True,
     ),
     "kraken": ExchangeConfig(

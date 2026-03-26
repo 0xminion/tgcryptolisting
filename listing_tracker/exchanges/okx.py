@@ -7,7 +7,7 @@ import logging
 
 import httpx
 
-from listing_tracker.config import ADAPTER_TIMEOUT_SECONDS, ExchangeConfig
+from listing_tracker.config import ExchangeConfig
 from listing_tracker.exchanges.base import (
     AdapterError,
     BaseAdapter,
@@ -59,7 +59,7 @@ class OkxAdapter(BaseAdapter):
     async def _fetch_type(self, inst_type: str) -> list[dict]:
         try:
             resp = await with_429_retry(
-                self._client.get(BASE_URL, params={"instType": inst_type})
+                lambda: self._client.get(BASE_URL, params={"instType": inst_type})
             )
             resp.raise_for_status()
             data = resp.json()

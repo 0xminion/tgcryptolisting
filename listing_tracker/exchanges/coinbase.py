@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from listing_tracker.config import ADAPTER_TIMEOUT_SECONDS, ExchangeConfig
+from listing_tracker.config import ExchangeConfig
 from listing_tracker.exchanges.base import (
     AdapterError,
     BaseAdapter,
@@ -57,7 +57,7 @@ class CoinbaseAdapter(BaseAdapter):
 
     async def _fetch_spot_products(self) -> dict[str, InstrumentInfo]:
         try:
-            resp = await with_429_retry(self._client.get(PRODUCTS_URL))
+            resp = await with_429_retry(lambda: self._client.get(PRODUCTS_URL))
             resp.raise_for_status()
             products = resp.json()
         except (httpx.HTTPError, asyncio.TimeoutError, ValueError) as e:

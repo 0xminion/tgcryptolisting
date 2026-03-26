@@ -40,7 +40,8 @@ def _locked_file(path: Path, mode: str = "r"):
     finally:
         fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
         lock_fd.close()
-        lock_path.unlink(missing_ok=True)
+        # Do NOT delete the lock file — removing it creates a race where
+        # concurrent processes can acquire locks on different inodes.
 
 
 # --- Directory Setup ---

@@ -7,7 +7,7 @@ import logging
 
 import httpx
 
-from listing_tracker.config import ADAPTER_TIMEOUT_SECONDS, ExchangeConfig
+from listing_tracker.config import ExchangeConfig
 from listing_tracker.exchanges.base import (
     AdapterError,
     BaseAdapter,
@@ -44,7 +44,7 @@ class BinanceAdapter(BaseAdapter):
     async def _fetch_spot(self) -> dict[str, InstrumentInfo]:
         try:
             resp = await with_429_retry(
-                self._client.get(self.config.spot_url)
+                lambda: self._client.get(self.config.spot_url)
             )
             resp.raise_for_status()
             data = resp.json()
@@ -92,7 +92,7 @@ class BinanceAdapter(BaseAdapter):
     async def _fetch_futures(self) -> dict[str, InstrumentInfo]:
         try:
             resp = await with_429_retry(
-                self._client.get(self.config.futures_url)
+                lambda: self._client.get(self.config.futures_url)
             )
             resp.raise_for_status()
             data = resp.json()

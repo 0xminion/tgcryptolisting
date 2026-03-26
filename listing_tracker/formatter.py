@@ -117,24 +117,45 @@ def _format_listings(listings: list[dict]) -> str:
 
 
 def _split_message(message: str) -> list[str]:
-    """Split a message into chunks that fit Telegram's 4096 char limit."""
+    """Split a message into chunks that fit Telegram's 4096 char limit.
+
+    Tracks open HTML tags (<pre>, <b>, <i>) and closes/reopens them
+    at chunk boundaries so each chunk is valid HTML.
+    """
     if len(message) <= TELEGRAM_MAX_MESSAGE_LENGTH:
         return [message]
+
+    import re
 
     # Split at line boundaries
     lines = message.split("\n")
     chunks: list[str] = []
     current_chunk: list[str] = []
     current_len = 0
+    open_tags: list[str] = []  # stack of currently open tags
 
     for line in lines:
         line_len = len(line) + 1  # +1 for newline
         if current_len + line_len > TELEGRAM_MAX_MESSAGE_LENGTH and current_chunk:
-            chunks.append("\n".join(current_chunk))
-            current_chunk = []
-            current_len = 0
+            # Close any open tags at the end of this chunk
+            closing = "".join(f"</{tag}>" for tag in reversed(open_tags))
+            chunks.append("\n".join(current_chunk) + closing)
+            # Reopen tags at the start of the next chunk
+            current_chunk = [f"<{tag}>" for tag in open_tags]
+            current_len = sum(len(t) + 1 for t in current_chunk)
+
         current_chunk.append(line)
         current_len += line_len
+
+        # Track tag opens/closes in this line
+        for match in re.finditer(r"<(/?)(\w+)>", line):
+            is_close, tag = match.group(1), match.group(2).lower()
+            if tag in ("pre", "b", "i", "code"):
+                if is_close:
+                    if open_tags and open_tags[-1] == tag:
+                        open_tags.pop()
+                else:
+                    open_tags.append(tag)
 
     if current_chunk:
         chunks.append("\n".join(current_chunk))

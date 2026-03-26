@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Awaitable, TypeVar
+from collections.abc import Callable, Coroutine
+from email.utils import parsedate_to_datetime
+from typing import Any
 
 import httpx
 
 from listing_tracker.config import ADAPTER_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
-
-T = TypeVar("T")
 
 
 def _retry_after_delay(headers: httpx.Headers, attempt: int) -> float:
@@ -24,19 +24,32 @@ def _retry_after_delay(headers: httpx.Headers, attempt: int) -> float:
     retry_after = headers.get("retry-after", "")
     if retry_after:
         try:
-            # Could be seconds as int
             return float(retry_after)
         except ValueError:
-            pass  # Fall through to exponential
+            pass
+        # Try HTTP-date format (e.g. "Wed, 21 Oct 2026 07:28:00 GMT")
+        try:
+            from datetime import datetime, timezone
+
+            target = parsedate_to_datetime(retry_after)
+            delta = (target - datetime.now(timezone.utc)).total_seconds()
+            return max(delta, 1.0)
+        except Exception:
+            pass
     # Exponential backoff: 1s, 2s, 4s
     return min(2**attempt, 32)
 
 
 async def with_429_retry(
-    coro: Awaitable[httpx.Response],
+    request_factory: Callable[[], Coroutine[Any, Any, httpx.Response]],
     max_attempts: int = 4,
 ) -> httpx.Response:
     """Execute an async HTTP call with automatic retry on HTTP 429.
+
+    Args:
+        request_factory: A zero-arg callable that returns a fresh coroutine
+            on each call. Example: ``lambda: client.get(url)``
+        max_attempts: Maximum number of attempts before giving up.
 
     On 429, reads Retry-After header if present, otherwise uses exponential
     backoff (1s, 2s, 4s). Raises after max_attempts exhausted.
@@ -44,10 +57,9 @@ async def with_429_retry(
     last_exc: Exception | None = None
     for attempt in range(max_attempts):
         try:
-            response = await coro
+            response = await request_factory()
         except (httpx.HTTPError, asyncio.TimeoutError) as e:
             last_exc = e
-            # Network-level errors also retry
             if attempt < max_attempts - 1:
                 await asyncio.sleep(2**attempt)
                 continue
@@ -62,7 +74,6 @@ async def with_429_retry(
                            delay, attempt + 1, max_attempts)
             await asyncio.sleep(delay)
 
-    # Should not reach here, but satisfy type checker
     raise last_exc or RuntimeError("429 retry loop exhausted")
 
 

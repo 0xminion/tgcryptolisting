@@ -7,7 +7,7 @@ import logging
 
 import httpx
 
-from listing_tracker.config import ADAPTER_TIMEOUT_SECONDS, ExchangeConfig
+from listing_tracker.config import ExchangeConfig
 from listing_tracker.exchanges.base import (
     AdapterError,
     BaseAdapter,
@@ -53,19 +53,19 @@ class BybitAdapter(BaseAdapter):
                 )
         return instruments
 
-    async def _fetch_category(self, category: str) -> list[dict]:
+    async def _fetch_category(self, category: str, max_pages: int = 20) -> list[dict]:
         """Fetch instruments for a category, handling pagination for linear."""
         all_items: list[dict] = []
         cursor = None
 
-        while True:
+        for _page in range(max_pages):
             params: dict = {"category": category, "limit": "1000"}
             if cursor:
                 params["cursor"] = cursor
 
             try:
                 resp = await with_429_retry(
-                    self._client.get(BASE_URL, params=params)
+                    lambda params=params: self._client.get(BASE_URL, params=params)
                 )
                 resp.raise_for_status()
                 data = resp.json()

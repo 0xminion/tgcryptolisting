@@ -9,6 +9,11 @@ from listing_tracker.exchanges.base import ListingType
 
 logger = logging.getLogger(__name__)
 
+# If the current snapshot has fewer than this fraction of the previous
+# snapshot's symbols, treat the API response as partial/broken and skip
+# diffing to prevent a false-positive flood on the next successful poll.
+SNAPSHOT_SHRINK_THRESHOLD = 0.5
+
 
 @dataclass(slots=True)
 class NewListing:
@@ -42,6 +47,18 @@ def compare_snapshots(
 
     prev_keys = set(previous.get("symbols", {}).keys())
     curr_keys = set(current.get("symbols", {}).keys())
+
+    # Sanity check: if current snapshot is drastically smaller than previous,
+    # the API likely returned partial/empty data during an outage.
+    # Skip diffing to prevent false positive flood on recovery.
+    if prev_keys and len(curr_keys) < len(prev_keys) * SNAPSHOT_SHRINK_THRESHOLD:
+        logger.warning(
+            "%s: Snapshot shrank from %d to %d symbols (%.0f%%) — "
+            "possible API outage, skipping diff",
+            exchange, len(prev_keys), len(curr_keys),
+            (len(curr_keys) / len(prev_keys)) * 100,
+        )
+        return []
 
     new_keys = curr_keys - prev_keys
 

@@ -10,7 +10,6 @@ from enum import Enum
 from typing import ClassVar
 
 import ccxt
-import httpx
 
 from listing_tracker.config import ExchangeConfig
 
