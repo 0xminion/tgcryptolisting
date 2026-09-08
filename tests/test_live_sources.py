@@ -1,9 +1,13 @@
+import asyncio
 from decimal import Decimal
 
+import httpx
 import pytest
 
 from listing_tracker.live_sources import (
     SourcePayloadError,
+    _json_get,
+    _json_post,
     parse_aster_perp,
     parse_aster_spot,
     parse_binance_alpha,
@@ -23,6 +27,59 @@ from listing_tracker.live_sources import (
     parse_upbit,
     source_ids,
 )
+
+
+def test_json_get_retries_one_transient_read_error():
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.ReadError("connection reset", request=request)
+        return httpx.Response(200, json={"ok": True})
+
+    async def run() -> dict[str, bool]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await _json_get(client, "https://example.test/data")
+
+    assert asyncio.run(run()) == {"ok": True}
+    assert attempts == 2
+
+
+def test_json_post_retries_one_transient_read_error():
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.ReadError("connection reset", request=request)
+        return httpx.Response(200, json={"ok": True})
+
+    async def run() -> dict[str, bool]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await _json_post(client, "https://example.test/data", {"x": 1})
+
+    assert asyncio.run(run()) == {"ok": True}
+    assert attempts == 2
+
+
+def test_json_get_surfaces_endpoint_after_retry_is_exhausted():
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        raise httpx.ReadError("connection reset", request=request)
+
+    async def run() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await _json_get(client, "https://example.test/data")
+
+    with pytest.raises(SourcePayloadError, match="example.test/data.*2 attempts"):
+        asyncio.run(run())
+    assert attempts == 2
 
 
 def test_binance_spot_groups_quote_pairs_by_base_and_detects_pretrading():

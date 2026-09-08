@@ -588,6 +588,35 @@ def parse_hyperliquid_perps(payloads: list[tuple[str, Any]]) -> Snapshot:
     return _snapshot("hyperliquid_perp", "Hyperliquid Perpetual Futures", assets)
 
 
+async def _request_json(
+    client: httpx.AsyncClient,
+    method: str,
+    url: str,
+    **kwargs: Any,
+) -> Any:
+    """Retry one transient transport failure, then fail closed with endpoint context."""
+    attempts = 2
+    for attempt in range(1, attempts + 1):
+        try:
+            response = await client.request(method, url, **kwargs)
+        except httpx.TransportError as exc:
+            if attempt < attempts:
+                await asyncio.sleep(0.25)
+                continue
+            raise SourcePayloadError(
+                f"{url}: {type(exc).__name__} after {attempts} attempts"
+            ) from exc
+
+        response.raise_for_status()
+        if len(response.content) > 50_000_000:
+            raise SourcePayloadError(f"{url}: response exceeds 50 MB")
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise SourcePayloadError(f"{url}: invalid JSON") from exc
+    raise AssertionError("unreachable")
+
+
 async def _json_get(
     client: httpx.AsyncClient,
     url: str,
@@ -595,25 +624,11 @@ async def _json_get(
     params: dict[str, str] | None = None,
     headers: dict[str, str] | None = None,
 ) -> Any:
-    response = await client.get(url, params=params, headers=headers)
-    response.raise_for_status()
-    if len(response.content) > 50_000_000:
-        raise SourcePayloadError(f"{url}: response exceeds 50 MB")
-    try:
-        return response.json()
-    except ValueError as exc:
-        raise SourcePayloadError(f"{url}: invalid JSON") from exc
+    return await _request_json(client, "GET", url, params=params, headers=headers)
 
 
 async def _json_post(client: httpx.AsyncClient, url: str, payload: Any) -> Any:
-    response = await client.post(url, json=payload)
-    response.raise_for_status()
-    if len(response.content) > 50_000_000:
-        raise SourcePayloadError(f"{url}: response exceeds 50 MB")
-    try:
-        return response.json()
-    except ValueError as exc:
-        raise SourcePayloadError(f"{url}: invalid JSON") from exc
+    return await _request_json(client, "POST", url, json=payload)
 
 
 async def _fetch_binance_spot(client: httpx.AsyncClient) -> Snapshot:
