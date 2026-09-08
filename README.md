@@ -1,155 +1,116 @@
-# token-listing-tracker
+# Token Listing Tracker
 
-Track new cryptocurrency exchange listings across 8 major exchanges and deliver alerts via Telegram.
+A deterministic, one-minute monitor for exchange token listings and delistings. It polls public market-universe endpoints concurrently, stores token-level state in SQLite, and delivers each transition through Hermes only after validating a destination-bound delivery receipt.
 
-## Features
+## Coverage
 
-- **8 Exchanges**: Binance, OKX, Coinbase, Upbit, Bithumb, Bybit, Bitget, Kraken
-- **Listing Classification**:
-  - `(S)` — Spot listing
-  - `(F)` — Perpetual/futures listing
-  - `(R)` — Coinbase roadmap addition (not yet live)
-  - `(A/O)` — Alpha/pre-listing (e.g., Binance Alpha)
-- **Dual Output**: Real-time push alerts + daily Telegram digest
-- **Snapshot Diffing**: Compares current exchange state against stored snapshots to detect new pairs
-- **Hybrid Architecture**: [ccxt](https://github.com/ccxt/ccxt) for commodity exchanges + custom HTTP adapters for exchanges requiring metadata (Binance Alpha, OKX listTime, Coinbase roadmap)
-- **Resilient Storage**: Atomic JSON writes, append-only daily journal, backup rotation, staleness detection
-- **429 Rate-Limit Handling**: Automatic retries with `Retry-After` header parsing (seconds and HTTP-date formats) and exponential backoff
-- **Snapshot Shrink Protection**: Detects partial/empty API responses and skips diffing to prevent false-positive alert floods on exchange outages
-- **Safe Message Splitting**: Tracks and closes/reopens HTML tags (`<pre>`, `<b>`, `<i>`) at chunk boundaries for valid Telegram messages
+- Binance Spot
+- Binance Perpetual Futures
+- Binance Alpha
+- OKX Spot and Perpetual Futures
+- Coinbase Spot
+- Upbit Spot
+- Bithumb Spot
+- Bybit Spot and Perpetual Futures
+- Bitget Spot and Perpetual Futures
+- Kraken Spot
+- Robinhood Spot
+- Aster Spot and Perpetual Futures
+- Hyperliquid Spot and Perpetual Futures, including HIP-3 perp DEX universes
 
-## Sample Output
+The monitor tracks **token-level product presence**, not every quote pair. Adding `TOKEN/BTC` for a token already trading as `TOKEN/USDT` does not create a false “new token” alert.
 
-```
---------- Listing Daily Report 26/03/2026 ---------
-Exchange  | Listing
-----------+---------------------------
-Binance   | NEWUSDT (S), ENAUSDT (F)
-Coinbase  | MEGA (R)
-Bybit     | XRPUSDT (F)
-----------+---------------------------
-OKX       | n/a
-Upbit     | n/a
-Bithumb   | n/a
-Bitget    | n/a
-Kraken    | n/a
+## Alert format
 
-S=Spot F=Futures R=Roadmap A/O=Alpha/Other
+```text
+Binance Alpha lists new tokens:
+
+Pons (PONS)
+Contract Address: 0x39dbed3a2bd333467115de45665cc57f813c4571 (Robinhood)
+
+PONS  MarketCap: 519.1M
+————————————
+2026-09-08 19:01:45
 ```
 
-Exchanges with new listings appear first (in priority order). Exchanges with no activity show `n/a` below the separator.
+Delistings use the same structure with `delists tokens`. Contract address, network, and market capitalization are printed only when the monitored exchange endpoint provides a verifiable value. Otherwise the fixed lines remain present as `Not available` and `n/a`; the monitor does not guess identity from a ticker.
 
-## Installation
+## Detection semantics
+
+- The first successful response from each source creates a **silent baseline**.
+- A newly active token or an inactive-to-active transition emits a listing.
+- Explicit terminal states such as `fullyDelisted`, `delisted`, or a scheduled `offTime` emit a delisting immediately.
+- Temporary or ambiguous unavailable states do not produce fake delisting/relisting cycles while the product remains in the venue inventory.
+- A token missing from an otherwise healthy response must be absent on two consecutive polls before a delisting is emitted.
+- A snapshot that loses more than half its prior token set is rejected without changing state. This prevents API degradation from becoming hundreds of fake delistings.
+- Source failures are isolated. A failed venue cannot mutate or delete its last known state.
+- Events enter a durable SQLite outbox. They remain pending until `hermes send --json` proves the requested platform, chat, and message ID. A thread-scoped target is rejected if the installed Hermes receipt cannot prove the effective thread.
+- A filesystem lock plus a 50-second process deadline prevents overlapping one-minute polls.
+
+## Run locally
+
+Python 3.11 or later is required.
 
 ```bash
-git clone https://github.com/0xminion/token-listing-tracker.git
-cd token-listing-tracker
-pip install -e .
+uv venv --python 3.11 .venv
+uv pip install --python .venv/bin/python -e '.[dev]'
+
+# Fetch every live dependency without changing state
+.venv/bin/python -m listing_tracker.live probe
+
+# Build a silent baseline in a disposable database
+.venv/bin/python -m listing_tracker.live poll \
+  --db /tmp/listing-tracker.db \
+  --stdout-delivery
+
+# Inspect source health and pending events
+.venv/bin/python -m listing_tracker.live status \
+  --db /tmp/listing-tracker.db
+
+# Test suite
+.venv/bin/python -m pytest -q
 ```
 
-## Usage
+## Production layout
+
+The deployed no-agent job uses:
+
+- checkout: `~/services/token-listing-tracker`
+- wrapper: `deploy/run-live-monitor.sh`
+- Hermes adapter: `~/.hermes/scripts/token-listing-monitor.sh`
+- runtime config: `~/.config/token-listing-tracker.env` with mode `0600`
+- state: `~/.local/state/token-listing-tracker/listings.db`
+- schedule: `*/1 * * * *`
+- inference: none (`no_agent: true`)
+
+Example runtime config:
 
 ```bash
-# One-shot check — prints results to stdout
-python -m listing_tracker.main check
-
-# Poll mode — fetch snapshots, diff, push real-time alerts to Telegram
-python -m listing_tracker.main poll
-
-# Report mode — generate and send daily digest to Telegram
-python -m listing_tracker.main report
+LISTING_TRACKER_TARGET=telegram:<chat_id>
+LISTING_TRACKER_TIMEZONE=Australia/Perth
 ```
 
-## Hermes Agent Integration
+For Hermes `0.21.0`, use a parent Telegram chat unless a live `hermes send --json` receipt proves the effective thread ID. A successful process exit without a target-bound receipt is not an acknowledgement.
 
-This project is designed to run as a [hermes-agent](https://hermes-agent.nousresearch.com/docs) skill with cron scheduling.
+## Source contracts
 
-### Setup
+The production path uses fixed HTTPS endpoints and strict response-envelope checks:
 
-1. Copy the project to your hermes skills directory:
-   ```bash
-   cp -r . ~/.hermes/skills/listing-tracker/
-   ```
+- Binance: Spot `exchangeInfo`, USDⓈ-M and COIN-M Futures `exchangeInfo`, and the documented Alpha token list
+- OKX: public `instruments` for `SPOT` and `SWAP`
+- Coinbase Exchange: public products
+- Upbit and Bithumb: public market lists
+- Bybit: V5 spot, linear, and inverse instrument info with bounded cursor pagination
+- Bitget: V2 spot symbols plus USDT-, USDC-, and coin-margined futures contracts
+- Kraken: public asset pairs
+- Robinhood: public `nummus.robinhood.com/currency_pairs/` app endpoint
+- Aster: documented SAPI/FAPI exchange information
+- Hyperliquid: documented `spotMeta`, `perpDexs`, and per-DEX `meta` calls
 
-2. Create cron jobs:
-   ```bash
-   # Real-time polling every 15 minutes
-   hermes cron create "*/15 * * * *" "python -m listing_tracker.main poll"
+Robinhood is the only adapter using an undocumented public app endpoint because Robinhood's supported Crypto Trading API requires account credentials. The adapter fails closed if that endpoint changes. It should be replaced with the authenticated supported API if dedicated Robinhood API credentials are provisioned.
 
-   # Daily digest at 9 AM UTC
-   hermes cron create "0 9 * * *" "python -m listing_tracker.main report"
-   ```
+## Important boundary
 
-3. Ensure Telegram is configured as a delivery channel in hermes (`~/.hermes/config.yaml`).
+This system detects exchange product metadata and live/pre-open state changes. It does not scrape announcement articles, infer token contracts from ambiguous symbols, or claim that an event is a first-ever global token launch. A venue can publish an announcement before its market API changes; the monitor will alert when the venue exposes the product or a pre-listing state through the monitored endpoint.
 
-## Architecture
-
-```
-main.py (asyncio orchestrator)
-  │
-  ├── asyncio.gather() with 30s per-adapter timeout
-  │
-  ├── ccxt adapters ──── Upbit, Bithumb, Kraken
-  ├── custom adapters ── Binance (spot+futures+alpha), OKX, Bybit, Bitget
-  └── coinbase adapter ─ Products API (S) + web_search roadmap (R)
-  │
-  ├── storage.py ─── Atomic JSON snapshots + append-only journal
-  ├── differ.py ──── Snapshot comparison + classification tagging
-  ├── formatter.py ─ Telegram HTML formatting
-  └── alerter.py ─── Real-time push + daily digest delivery
-```
-
-## Exchange API Endpoints
-
-| Exchange | Type | Endpoint | Auth |
-|----------|------|----------|------|
-| Binance | Custom | `/api/v3/exchangeInfo` + `/fapi/v1/exchangeInfo` | Public |
-| OKX | Custom | `/api/v5/public/instruments` (SPOT + SWAP) | Public |
-| Coinbase | Custom | `/products` | Public |
-| Upbit | ccxt | `load_markets()` | Public |
-| Bithumb | ccxt | `load_markets()` | Public |
-| Bybit | Custom | `/v5/market/instruments-info` (spot + linear) | Public |
-| Bitget | Custom | `/api/v2/spot/public/symbols` + `/api/v2/mix/market/contracts` | Public |
-| Kraken | ccxt | `load_markets()` | Public |
-
-All endpoints are public and free — no API keys required.
-
-## Data Storage
-
-Snapshots and journals are stored in `~/.hermes/skills/listing-tracker/data/`:
-
-```
-data/
-├── snapshots/
-│   ├── binance_all.json      # Latest exchange state
-│   ├── binance_all.bak       # Previous snapshot (backup)
-│   ├── okx_all.json
-│   └── ...
-└── journal/
-    ├── journal_2026-03-25.json  # All listings detected that day
-    └── journal_2026-03-26.json
-```
-
-- **Atomic writes**: Write to `.tmp` then `os.rename()` — no corruption on crash
-- **Backup rotation**: Previous snapshot kept as `.bak`
-- **Staleness detection**: Warning if any exchange returns 0 symbols for 7+ consecutive polls
-- **Lock file safety**: File locks use persistent lock files to avoid inode race conditions between concurrent processes
-
-## Testing
-
-```bash
-pip install -e ".[dev]"
-pytest tests/ -v
-```
-
-26 tests covering snapshot diffing, storage atomicity, Telegram formatting, HTML escaping, message splitting, staleness tracking, and classification tagging.
-
-## Dependencies
-
-- `httpx` — Async HTTP client
-- `ccxt` — Unified exchange library
-- `python-dateutil` — Date parsing
-
-## License
-
-MIT
+See [TECHNICAL_DEEP_DIVE.md](TECHNICAL_DEEP_DIVE.md) for state, parsing, and delivery details.

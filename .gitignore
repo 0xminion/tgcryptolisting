@@ -1,10 +1,14 @@
 __pycache__/
-*.pyc
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
 *.egg-info/
 dist/
 build/
-.pytest_cache/
-data/snapshots/
 .env
+*.db
+*.db-shm
+*.db-wal
 *.tmp
 *.bak
