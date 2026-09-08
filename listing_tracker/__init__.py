@@ -1,1 +1,3 @@
-"""Hermes Listing Tracker - Track new cryptocurrency exchange listings."""
+"""Low-latency exchange listing and delisting monitor."""
+
+__version__ = "0.2.0"

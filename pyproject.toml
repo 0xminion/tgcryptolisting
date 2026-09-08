@@ -4,19 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-listing-tracker"
-version = "0.1.0"
-description = "Track new cryptocurrency exchange listings across 8 major exchanges"
+version = "0.2.0"
+description = "Low-latency exchange listing and delisting monitor with durable delivery"
 requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.27.0",
-    "ccxt>=4.0.0",
-    "python-dateutil>=2.9",
 ]
 
+[project.scripts]
+listing-live = "listing_tracker.live:main"
+
 [project.optional-dependencies]
-roadmap = [
-    "ddgs>=3.0.0",
-]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
