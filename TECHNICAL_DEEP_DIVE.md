@@ -48,12 +48,13 @@ For each source:
 2. New active asset: create `listed` event.
 3. Existing inactive asset becomes active: create another `listed` event.
 4. Existing active asset receives a terminal inactive state: create `delisted` immediately.
-5. Existing active asset receives a non-terminal inactive state: require two consecutive responses.
-6. Existing active asset disappears: require two consecutive complete responses.
-7. Missing or inactive state recovers before confirmation: clear the streak without an event.
-8. Snapshot count drops to 50% or less of that source's historical maximum: roll back and reject the response. The maximum never ratchets down after a partial response.
+5. Existing active asset receives a source-authenticated but non-terminal removal candidate: require two consecutive responses.
+6. Temporary or ambiguous unavailability (`BREAK`, `suspend`, `offline`, `halt`, or Robinhood `untradable`) never becomes a delisting while the product remains present.
+7. Existing active asset disappears: require two consecutive complete responses.
+8. Missing or removal-candidate state recovers before confirmation: clear the streak without an event.
+9. Snapshot count drops to 50% or less of that source's historical maximum: roll back and reject the response. The maximum never ratchets down after a partial response.
 
-`BREAK`, `suspend`, `offline`, `halt`, and Robinhood `untradable` states are not universally authenticated delisting claims. Source parsers keep those rows listed unless the venue defines a terminal state; otherwise a row must disappear from complete snapshots before a delisting event is possible.
+The state machine preserves the last confirmed listed state across ambiguous unavailability, but a product that first appears unavailable remains unlisted until it becomes active. Robinhood `display_only=true` is treated as an explicit move to view-only; plain `untradable` is not.
 
 The event journal allows repeated list/delist/relist lifecycles. The outbox is the subset where `delivered_at IS NULL`. Delivery workers atomically claim an event using a random token and expiring lease. Compare-and-set acknowledgement prevents two workers from acknowledging or intentionally delivering the same live lease.
 

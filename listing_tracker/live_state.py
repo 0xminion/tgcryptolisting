@@ -213,19 +213,30 @@ class StateStore:
                             )
                         )
                 elif was_active:
-                    inactive_streak = int(previous["inactive_streak"]) + 1
-                    confirmed = item.terminal or (
-                        inactive_streak >= self.removal_confirmations
-                    )
-                    if confirmed:
-                        effective_active = False
-                        changes.append(
-                            self._record_event(
-                                conn, snapshot, item, ChangeKind.DELISTED, detected_at
-                            )
-                        )
-                    else:
+                    if not item.inactive_is_removal:
+                        # A present-but-unavailable product (maintenance, view-only,
+                        # BREAK, offline) is not a verified delisting. Preserve the
+                        # last confirmed listed state until an explicit terminal
+                        # status or confirmed inventory removal arrives.
                         effective_active = True
+                    else:
+                        inactive_streak = int(previous["inactive_streak"]) + 1
+                        confirmed = item.terminal or (
+                            inactive_streak >= self.removal_confirmations
+                        )
+                        if confirmed:
+                            effective_active = False
+                            changes.append(
+                                self._record_event(
+                                    conn,
+                                    snapshot,
+                                    item,
+                                    ChangeKind.DELISTED,
+                                    detected_at,
+                                )
+                            )
+                        else:
+                            effective_active = True
                 else:
                     effective_active = False
 

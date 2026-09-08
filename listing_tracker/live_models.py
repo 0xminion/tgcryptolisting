@@ -22,6 +22,7 @@ class Asset:
     name: str
     active: bool
     terminal: bool = False
+    inactive_is_removal: bool = True
     status: str = ""
     contract_address: str | None = None
     network: str | None = None

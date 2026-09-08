@@ -75,7 +75,7 @@ def _merge(existing: Asset | None, item: Asset) -> Asset:
     if existing is None:
         return item
     active = existing.active or item.active
-    terminal = (existing.terminal or item.terminal) and not active
+    terminal = existing.terminal and item.terminal and not active
     statuses = sorted(set(filter(None, (existing.status, item.status))))
     name = existing.name
     if name == existing.ticker and item.name != item.ticker:
@@ -86,6 +86,8 @@ def _merge(existing: Asset | None, item: Asset) -> Asset:
         name=name,
         active=active,
         terminal=terminal,
+        inactive_is_removal=(existing.inactive_is_removal and item.inactive_is_removal)
+        and not active,
         status=",".join(statuses),
         contract_address=existing.contract_address or item.contract_address,
         network=existing.network or item.network,
@@ -113,11 +115,9 @@ def parse_binance_spot(payload: Any) -> Snapshot:
                 instrument_id=base,
                 ticker=base,
                 name=base,
-                # BREAK means non-trading, not necessarily delisted. Presence in
-                # exchangeInfo remains the verified spot-listing fact unless the
-                # API explicitly marks the symbol DELISTED.
-                active=status != "DELISTED",
+                active=status in {"TRADING", "PRE_TRADING"},
                 terminal=status == "DELISTED",
+                inactive_is_removal=status == "DELISTED",
                 status=status,
             )
         )
@@ -140,6 +140,7 @@ def parse_binance_perp(payload: Any) -> Snapshot:
                 name=base,
                 active=status in {"TRADING", "PENDING_TRADING", "PRE_TRADING"},
                 terminal=status in {"SETTLING", "DELISTED"},
+                inactive_is_removal=status in {"SETTLING", "DELISTED"},
                 status=status,
             )
         )
@@ -165,10 +166,9 @@ def parse_binance_alpha(payload: Any) -> Snapshot:
                 instrument_id=instrument_id,
                 ticker=ticker,
                 name=_optional_text(item.get("name")) or ticker,
-                # The token remains listed while temporarily offline; the
-                # endpoint exposes a separate authoritative delisting flag.
-                active=not fully_delisted,
+                active=not fully_delisted and not offline,
                 terminal=fully_delisted,
+                inactive_is_removal=fully_delisted,
                 status=(
                     "FULLY_DELISTED"
                     if fully_delisted
@@ -207,9 +207,9 @@ def parse_okx(payload: Any, product: str) -> Snapshot:
                 instrument_id=base,
                 ticker=base,
                 name=base,
-                # OKX suspend is a trading pause, not a delisting.
-                active=status in {"live", "preopen", "suspend"},
+                active=status in {"live", "preopen"},
                 terminal=False,
+                inactive_is_removal=False,
                 status=status,
             )
         )
@@ -232,10 +232,9 @@ def parse_coinbase(payload: Any) -> Snapshot:
                 instrument_id=base,
                 ticker=base,
                 name=base,
-                # Coinbase uses offline for maintenance and pre-launch states;
-                # only its explicit delisted state removes token presence.
-                active=status != "delisted",
+                active=status == "online",
                 terminal=status == "delisted",
+                inactive_is_removal=status == "delisted",
                 status=status,
             )
         )
@@ -306,6 +305,8 @@ def parse_bybit_spot(payload: Any) -> Snapshot:
                 name=_optional_text(item.get("fullName")) or base,
                 active=status in {"Trading", "PreLaunch", "PendingOpen"},
                 terminal=status in {"Settling", "Delivering", "Closed", "Delisted"},
+                inactive_is_removal=status
+                in {"Settling", "Delivering", "Closed", "Delisted"},
                 status=status,
             )
         )
@@ -327,6 +328,8 @@ def parse_bybit_perp(payload: Any) -> Snapshot:
                 name=base,
                 active=status in {"Trading", "PreLaunch", "PendingOpen"},
                 terminal=status in {"Settling", "Delivering", "Closed", "Delisted"},
+                inactive_is_removal=status
+                in {"Settling", "Delivering", "Closed", "Delisted"},
                 status=status,
             )
         )
@@ -359,8 +362,9 @@ def parse_bitget_spot(payload: Any) -> Snapshot:
                 instrument_id=base,
                 ticker=base,
                 name=base,
-                active=not scheduled_off and status in {"online", "halt"},
+                active=not scheduled_off and status == "online",
                 terminal=scheduled_off,
+                inactive_is_removal=scheduled_off,
                 status="SCHEDULED_OFF" if scheduled_off else status,
             )
         )
@@ -379,8 +383,9 @@ def parse_bitget_perp(payload: Any) -> Snapshot:
                 instrument_id=base,
                 ticker=base,
                 name=base,
-                active=not scheduled_off and status in {"normal", "maintain"},
+                active=not scheduled_off and status == "normal",
                 terminal=scheduled_off,
+                inactive_is_removal=scheduled_off,
                 status="SCHEDULED_OFF" if scheduled_off else status,
             )
         )
@@ -422,16 +427,18 @@ def parse_robinhood(payload: Any) -> Snapshot:
         instrument_id = _text(asset.get("id"), "asset_currency.id")
         ticker = _text(asset.get("code"), "asset_currency.code")
         status = _text(item.get("tradability"), "tradability")
+        display_only = item.get("display_only", False)
+        if not isinstance(display_only, bool):
+            raise SourcePayloadError("robinhood: invalid display_only flag")
         assets.append(
             Asset(
                 instrument_id=instrument_id,
                 ticker=ticker,
                 name=_optional_text(asset.get("name")) or ticker,
-                # Untradable includes display-only and temporary restrictions;
-                # it is not an authenticated terminal-delisting assertion.
-                active=True,
-                terminal=False,
-                status=status,
+                active=status == "tradable" and not display_only,
+                terminal=display_only,
+                inactive_is_removal=display_only,
+                status="DISPLAY_ONLY" if display_only else status,
             )
         )
     return _snapshot("robinhood_spot", "Robinhood Spot", assets)
@@ -459,8 +466,11 @@ def parse_aster_spot(payload: Any) -> Snapshot:
                 instrument_id=base,
                 ticker=base,
                 name=base,
-                active=status in {"TRADING", "PRE_TRADING", "PENDING_TRADING"},
-                terminal=status in {"CLOSE", "DELISTED"},
+                # The spot schema only documents TRADING. Unknown states are
+                # unavailable, not authenticated delistings.
+                active=status == "TRADING",
+                terminal=False,
+                inactive_is_removal=False,
                 status=status,
                 contract_address=address,
                 # The endpoint does not authenticate a chain for this address.
@@ -489,6 +499,8 @@ def parse_aster_perp(payload: Any) -> Snapshot:
                 name=base,
                 active=status in {"TRADING", "PRE_TRADING", "PENDING_TRADING"},
                 terminal=status in {"PRE_SETTLE", "SETTLING", "CLOSE", "DELISTED"},
+                inactive_is_removal=status
+                in {"PRE_SETTLE", "SETTLING", "CLOSE", "DELISTED"},
                 status=status,
             )
         )

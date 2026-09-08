@@ -61,8 +61,9 @@ def test_binance_spot_break_is_not_mislabeled_as_delisting():
             ]
         }
     )
-    assert snap.assets["PONS"].active is True
+    assert snap.assets["PONS"].active is False
     assert snap.assets["PONS"].terminal is False
+    assert snap.assets["PONS"].inactive_is_removal is False
 
 
 def test_binance_perp_keeps_only_perpetual_contracts_and_pending_is_active():
@@ -146,7 +147,8 @@ def test_binance_alpha_offline_is_not_a_delisting_without_terminal_flag():
         ],
     }
     item = parse_binance_alpha(payload).assets["A"]
-    assert item.active is True
+    assert item.active is False
+    assert item.inactive_is_removal is False
     assert item.status == "OFFLINE"
 
 
@@ -166,7 +168,9 @@ def test_okx_spot_and_swap_state_semantics():
     assert parse_okx(payload, "SWAP").assets["PONS"].active is True
 
     payload["data"][0]["state"] = "suspend"
-    assert parse_okx(payload, "SPOT").assets["PONS"].active is True
+    suspended = parse_okx(payload, "SPOT").assets["PONS"]
+    assert suspended.active is False
+    assert suspended.inactive_is_removal is False
 
 
 def test_coinbase_delisted_pair_does_not_override_live_pair_for_same_base():
@@ -203,7 +207,31 @@ def test_coinbase_offline_is_still_listed_until_explicitly_delisted():
             }
         ]
     )
-    assert snap.assets["PONS"].active is True
+    assert snap.assets["PONS"].active is False
+    assert snap.assets["PONS"].inactive_is_removal is False
+
+
+def test_token_merge_requires_every_inactive_pair_to_assert_removal():
+    snap = parse_coinbase(
+        [
+            {
+                "id": "PONS-USD",
+                "base_currency": "PONS",
+                "quote_currency": "USD",
+                "status": "delisted",
+            },
+            {
+                "id": "PONS-USDT",
+                "base_currency": "PONS",
+                "quote_currency": "USDT",
+                "status": "offline",
+            },
+        ]
+    )
+    item = snap.assets["PONS"]
+    assert item.active is False
+    assert item.terminal is False
+    assert item.inactive_is_removal is False
 
 
 def test_presence_only_korean_exchange_parsers_keep_names():
@@ -357,7 +385,28 @@ def test_robinhood_uses_asset_uuid_and_tradability():
             ]
         }
     )
-    assert untradable.assets["asset-1"].active is True
+    assert untradable.assets["asset-1"].active is False
+    assert untradable.assets["asset-1"].inactive_is_removal is False
+
+    display_only = parse_robinhood(
+        {
+            "results": [
+                {
+                    "id": "pair-1",
+                    "symbol": "PONS-USD",
+                    "tradability": "untradable",
+                    "display_only": True,
+                    "asset_currency": {
+                        "id": "asset-1",
+                        "code": "PONS",
+                        "name": "Pons",
+                    },
+                }
+            ]
+        }
+    ).assets["asset-1"]
+    assert display_only.active is False
+    assert display_only.terminal is True
 
 
 def test_aster_spot_excludes_documented_test_symbols_and_keeps_address():

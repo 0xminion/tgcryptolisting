@@ -17,6 +17,7 @@ def asset(
     active: bool = True,
     terminal: bool = False,
     status: str = "TRADING",
+    inactive_is_removal: bool = True,
 ) -> Asset:
     return Asset(
         instrument_id=ticker,
@@ -25,6 +26,7 @@ def asset(
         active=active,
         terminal=terminal,
         status=status,
+        inactive_is_removal=inactive_is_removal,
         contract_address="0x39dbed3a2bd333467115de45665cc57f813c4571",
         network="Robinhood",
         market_cap=Decimal(519100000),
@@ -85,6 +87,25 @@ def test_nonterminal_inactive_state_requires_two_confirmations(tmp_path):
     changes = store.apply(snapshot(asset(active=False, status="offline")), NOW)
 
     assert [event.kind for event in changes] == [ChangeKind.DELISTED]
+
+
+def test_uncertain_unavailability_never_becomes_a_delisting(tmp_path):
+    store = StateStore(tmp_path / "state.db", removal_confirmations=2)
+    store.apply(snapshot(asset()), NOW)
+    unavailable = asset(active=False, status="BREAK", inactive_is_removal=False)
+    assert store.apply(snapshot(unavailable), NOW) == []
+    assert store.apply(snapshot(unavailable), NOW) == []
+    assert store.apply(snapshot(asset()), NOW) == []
+
+
+def test_uncertain_prelisting_can_later_emit_a_real_listing(tmp_path):
+    store = StateStore(tmp_path / "state.db")
+    unavailable = asset(active=False, status="offline", inactive_is_removal=False)
+    store.apply(snapshot(unavailable), NOW)
+
+    changes = store.apply(snapshot(asset()), NOW)
+
+    assert [item.kind for item in changes] == [ChangeKind.LISTED]
 
 
 def test_missing_asset_requires_two_complete_snapshots(tmp_path):

@@ -40,6 +40,7 @@ Delistings use the same structure with `delists tokens`. Contract address, netwo
 - The first successful response from each source creates a **silent baseline**.
 - A newly active token or an inactive-to-active transition emits a listing.
 - Explicit terminal states such as `fullyDelisted`, `delisted`, or a scheduled `offTime` emit a delisting immediately.
+- Temporary or ambiguous unavailable states do not produce fake delisting/relisting cycles while the product remains in the venue inventory.
 - A token missing from an otherwise healthy response must be absent on two consecutive polls before a delisting is emitted.
 - A snapshot that loses more than half its prior token set is rejected without changing state. This prevents API degradation from becoming hundreds of fake delistings.
 - Source failures are isolated. A failed venue cannot mutate or delete its last known state.
